@@ -1,65 +1,85 @@
-# Virtual Machines (Compute Cloud) https://cloud.yandex.ru/docs/free-trial/
+#### Домашнее задание №1. Работа с уровнями изоляции транзакции в PostgreSQL
 
-Создание виртуальной машины:
-https://cloud.yandex.ru/docs/compute/quickstart/quick-create-linux
+Для удобства прикладываю скрины первой и второй сессий, находятся в \project\HW1
 
-name vm: otus-db-pg-vm-1
+1) Создал ВМ postgres2025-zimin-sergey
+2) Воспользовался своей парой ключей для коннекта к ВМ
+3) Установил Postgres командой
+      `sudo apt update && sudo apt upgrade -y && sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list' && wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add - && sudo apt-get update && sudo apt-get -y install postgresql`
 
-Создать сеть:
-Каталог: default
-Имя: otus-vm-db-pg-net-1
 
-Доступ
-username: otus
+4. Создал две сессии psql
 
-настройка OpenSSH в Windows
-Параметры -> Система -> Дополнительные компоненты -> клиент Open SSH (добавить)
-Службы (Service) -> OpenSSH SSH Server (запустить)
+  #### Уровень изоляции read committed 
 
-Сгенерировать ssh-key:
-```bash
-ssh-keygen -t rsa -b 2048
-name ssh-key: yc_key
-chmod 600 ~/.ssh/yc_key.pub
-ls -lh ~/.ssh/
-cat ~/.ssh/yc_key.pub # в Windows C:\Users\<имя_пользователя>\.ssh\yc_key.pub
-```
-Подключение к VM:
-https://cloud.yandex.ru/docs/compute/operations/vm-connect/ssh
+5. Выключил авто коммит в обеих сессиях:
 
-```bash
-ssh -i ~/yc_key otus@158.160.201.121 # в Windows ssh -i <путь_к_ключу/имя_файла_ключа> <имя_пользователя>@<публичный_IP-адрес_виртуальной_машины>
+​	postgres=# \set AUTOCOMMIT off
 
-Установка Postgres:
-sudo apt update && sudo apt upgrade -y && sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list' && wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add - && sudo apt-get update && sudo apt-get -y install postgresql && sudo apt install unzip && sudo apt -y install mc
+​	Создал таблицу servers и две записи в ней:
 
-pg_lsclusters
+​	`postgres=*# create table servers (id int, place text, vendor text);`
+​	`	postgres=*# insert into servers values (101, 'DC1', 'IBM');`
+​	`	postgres=*# insert into servers values (102, 'DC1', 'Hitachi');`
+​	`	postgres=*# commit;`
 
-Установить пароль для Postgres:
-sudo -u postgres psql
-\password   #12345
-\q
+6. Текущий уровень изоляции:
 
-Добавить сетевые правила для подключения к Postgres:
-cd /etc/postgresql/17/main/
-sudo nano /etc/postgresql/17/main/postgresql.conf
-#listen_addresses = 'localhost'
-listen_addresses = '*'
+​	`postgres=# show transaction isolation level;`
 
-sudo nano /etc/postgresql/17/main/pg_hba.conf
-#host    all             all             127.0.0.1/32            scram-sha-256 password
-host    all             all             0.0.0.0/0               scram-sha-256 
+​	read committed
 
-sudo pg_ctlcluster 17 main restart
+​	Начал новую транзакцию в обеих сессиях с уровнем изоляции по умолчанию:
 
-Подключение к Postgres:
-psql -h 130.193.45.135 -U postgres
+​	`postgres=# begin;`
 
-\l
+​	В первой сессии добавил новую запись:
 
-## уровни изоляции транзакций
+​	`postgres=*# insert into servers values (103, 'DC1', 'Dell');`
 
-SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
-SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
-SHOW TRANSACTION ISOLATION LEVEL;
-```
+​	Во второй сессии делаю селект:
+
+​	`postgres=*# select * from servers;`
+
+**Вторая сессия не видит запись c id=103, созданную первой сессией, так как может видеть 	только те данные, которые были зафиксированы на момент начала селекта во второй сессии, 	что соответствует уровню изоляции "read committed".**
+
+​	Завершил первую транзакцию:
+
+​	`postgres=*# commit;`
+
+​	Во второй сессии проверяю:
+
+​	`postgres=*# select * from servers;`
+
+**После завершения транзакции в первой сессии - вторая сессия увидела запись c id=103, так как селект видит снимок базы данных на момент начала выполнения запроса.**
+
+#### Уровень изоляции repeatable read
+
+Начал новые транзакции в обеих сессиях с уровнем изоляции repeatable read
+
+​	`postgres=# begin;`
+
+​	`	postgres=*# set transaction isolation level repeatable read;`
+
+В первой сессии добавил запись с id=104
+
+​	`postgres=*# insert into servers values (104, 'DC1', 'Fujitsu');`
+
+Во второй сессии выполнил селект
+
+​	`postgres=*# select * from servers;`
+
+**Вторая сессия не видит запись c id=104, созданную первой сессией, так как в соответствии с уровнем изоляции "Repeatable Read" не может видеть данные, незафиксированные другими транзакциями.** 
+
+Завершил первую транзакцию (commit) и снова выполняю селект во второй сессии
+
+​	`postgres=*# select * from servers;`
+
+**Вторая сессия по прежнему не видит запись c id=104, созданную первой сессией, так как видит данные на момент начала транзакции второй сессии.** 
+
+Завершил вторую транзакцию во второй сессии и снова выполнил select
+
+​	`postgres=*# select * from servers;`
+
+**После завершения транзакции во второй сессии она увидела запись c id=104, так как по завершении первой транзакции обновился снимок данных.**
+
