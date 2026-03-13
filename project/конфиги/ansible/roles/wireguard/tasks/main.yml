@@ -1,0 +1,70 @@
+- name: Install packages
+  become: true
+  ansible.builtin.apt:
+    update_cache: true
+    name:
+      - wireguard
+      - iptables
+    state: present
+
+- name: Enable IPv4 forwarding
+  become: true
+  ansible.builtin.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    state: present
+    reload: true
+
+- name: Create WireGuard key directory
+  become: true
+  ansible.builtin.file:
+    path: /etc/wireguard/keys
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Generate server private key (if absent)
+  become: true
+  ansible.builtin.shell: |
+    umask 077
+    wg genkey > /etc/wireguard/keys/server.key
+  args:
+    creates: /etc/wireguard/keys/server.key
+
+- name: Read server private key
+  become: true
+  ansible.builtin.slurp:
+    src: /etc/wireguard/keys/server.key
+  register: wg_server_priv_b64
+
+- name: Derive server public key
+  become: true
+  ansible.builtin.shell: |
+    cat /etc/wireguard/keys/server.key | wg pubkey
+  register: wg_server_pub
+  changed_when: false
+
+- name: Render wg0.conf
+  become: true
+  ansible.builtin.template:
+    src: wg0.conf.j2
+    dest: /etc/wireguard/wg0.conf
+    owner: root
+    group: root
+    mode: "0600"
+  vars:
+    wg_server_private_key: "{{ wg_server_priv_b64.content | b64decode | trim }}"
+    wg_uplink_iface: "{{ ansible_default_ipv4.interface }}"
+  notify: Restart wg
+
+- name: Enable and start wg-quick@wg0
+  become: true
+  ansible.builtin.systemd:
+    name: "wg-quick@{{ wg_interface }}"
+    enabled: true
+    state: started
+
+- name: Show server public key (needed for client config)
+  ansible.builtin.debug:
+    msg: "WireGuard server public key: {{ wg_server_pub.stdout }}"

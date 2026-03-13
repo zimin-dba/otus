@@ -1,0 +1,77 @@
+scope: {{ patroni_scope }}
+name: {{ patroni_node_name }}
+
+restapi:
+  listen: {{ patroni_private_ip }}:{{ patroni_rest_port }}
+  connect_address: {{ patroni_private_ip }}:{{ patroni_rest_port }}
+
+etcd3:
+  hosts: {{ patroni_etcd_hosts | join(',') }}
+  protocol: {{ patroni_etcd_protocol }}
+
+log:
+  dir: {{ patroni_log_dir }}
+  file_num: 5
+  file_size: 20971520
+  mode: 0640
+  level: INFO
+  format: '%(asctime)s %(levelname)s [%(name)s] %(message)s'
+  dateformat: '%Y-%m-%d %H:%M:%S'
+  deduplicate_heartbeat_logs: false
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+{% for k, v in patroni_pg_parameters.items() %}
+        {{ k }}: {{ v | to_json }}
+{% endfor %}
+
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+
+  pg_hba:
+{% for line in patroni_pg_hba %}
+    - {{ line }}
+{% endfor %}
+
+  users:
+    {{ patroni_replication_name }}:
+      password: "{{ patroni_replication_password }}"
+      options:
+        - replication
+    {{ patroni_rewind_name }}:
+      password: "{{ patroni_rewind_password }}"
+      options:
+        - superuser
+
+postgresql:
+  listen: 0.0.0.0:{{ postgres_port }}
+  connect_address: {{ patroni_private_ip }}:{{ postgres_port }}
+  data_dir: {{ pg_data_dir }}
+  bin_dir: {{ pg_bin_dir }}
+  pgpass: {{ pg_pgpass }}
+
+  authentication:
+    replication:
+      username: {{ patroni_replication_name }}
+      password: "{{ patroni_replication_password }}"
+    superuser:
+      username: {{ patroni_superuser_name }}
+      password: "{{ patroni_superuser_password }}"
+    rewind:
+      username: {{ patroni_rewind_name }}
+      password: "{{ patroni_rewind_password }}"
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false

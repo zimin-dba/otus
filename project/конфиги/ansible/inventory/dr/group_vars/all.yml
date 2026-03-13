@@ -1,0 +1,17 @@
+wg_interface: wg0
+wg_listen_port: 51820
+
+# Сеть road-warrior (клиенты)
+wg_server_address: "10.60.0.1/24"
+wg_clients_cidr: "10.60.0.0/24"
+
+# Куда клиенту разрешено ходить через VPN
+wg_forward_cidrs:
+  - "10.50.0.0/16"
+  - "192.168.1.0/24"
+
+# Клиенты WireGuard
+wg_clients:
+  - name: laptop
+    public_key: ""
+    allowed_ips: "10.60.0.2/32"

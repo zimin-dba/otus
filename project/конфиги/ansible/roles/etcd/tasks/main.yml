@@ -1,0 +1,112 @@
+---
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install etcd packages
+  ansible.builtin.apt:
+    name:
+      - etcd-server
+      - etcd-client
+    state: present
+
+- name: Stop packaged etcd service before reconfiguration
+  ansible.builtin.systemd:
+    name: etcd
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Create config directory
+  ansible.builtin.file:
+    path: "{{ etcd_conf_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create data directory
+  ansible.builtin.file:
+    path: "{{ etcd_data_dir }}"
+    state: directory
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: "0700"
+
+- name: Deploy etcd config
+  ansible.builtin.template:
+    src: etcd.conf.j2
+    dest: "{{ etcd_conf_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart etcd
+
+- name: Deploy systemd unit
+  ansible.builtin.template:
+    src: etcd.service.j2
+    dest: /etc/systemd/system/etcd.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart etcd
+
+- name: Enable etcd service
+  ansible.builtin.systemd:
+    name: etcd
+    enabled: true
+    daemon_reload: true
+
+- name: Start etcd service
+  ansible.builtin.systemd:
+    name: etcd
+    state: started
+
+- name: Wait for client port 2379
+  ansible.builtin.wait_for:
+    host: "{{ private_ip }}"
+    port: "{{ etcd_client_port }}"
+    timeout: 60
+
+- name: Wait for peer port 2380
+  ansible.builtin.wait_for:
+    host: "{{ private_ip }}"
+    port: "{{ etcd_peer_port }}"
+    timeout: 60
+
+- name: Check cluster endpoint status
+  ansible.builtin.command:
+    cmd: >
+      etcdctl
+      --endpoints=http://10.50.10.11:2379,http://10.50.20.11:2379,http://10.50.30.11:2379
+      endpoint status --write-out=table
+  environment:
+    ETCDCTL_API: "3"
+  register: etcd_endpoint_status
+  changed_when: false
+  run_once: true
+
+- name: Show endpoint status
+  ansible.builtin.debug:
+    var: etcd_endpoint_status.stdout_lines
+  run_once: true
+
+- name: Check cluster members
+  ansible.builtin.command:
+    cmd: >
+      etcdctl
+      --endpoints=http://10.50.10.11:2379,http://10.50.20.11:2379,http://10.50.30.11:2379
+      member list --write-out=table
+  environment:
+    ETCDCTL_API: "3"
+  register: etcd_member_list
+  changed_when: false
+  run_once: true
+
+- name: Show member list
+  ansible.builtin.debug:
+    var: etcd_member_list.stdout_lines
+  run_once: true

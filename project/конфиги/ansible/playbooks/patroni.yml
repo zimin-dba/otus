@@ -1,0 +1,13 @@
+- name: PostgreSQL 18 + Patroni cluster
+  hosts: patroni
+  become: true
+  gather_facts: true
+
+  # Важно: первый узел бутстрапит кластер, второй присоединяется репликой
+  serial: 1
+
+  vars_files:
+    - ../inventory/dr/group_vars/all.yml
+
+  roles:
+    - role: patroni

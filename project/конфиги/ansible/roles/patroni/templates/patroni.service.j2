@@ -1,0 +1,17 @@
+[Unit]
+Description=Patroni PostgreSQL High Availability
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=postgres
+Group=postgres
+ExecStart=/usr/bin/patroni {{ patroni_conf_dir }}/patroni.yml
+KillMode=process
+TimeoutSec=30
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

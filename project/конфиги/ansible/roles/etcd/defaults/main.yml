@@ -1,0 +1,23 @@
+---
+etcd_user: etcd
+etcd_group: etcd
+etcd_conf_dir: /etc/etcd
+etcd_conf_file: /etc/etcd/etcd.conf
+etcd_data_dir: /var/lib/etcd/sb_cluster
+etcd_cluster_token: sb_cluster
+etcd_initial_cluster_state: new
+etcd_election_timeout: "10000"
+etcd_heartbeat_interval: "2000"
+
+etcd_client_port: 2379
+etcd_peer_port: 2380
+
+etcd_cluster_nodes:
+  - { name: "etcd1", ip: "10.50.10.11" }
+  - { name: "etcd2", ip: "10.50.20.11" }
+  - { name: "etcd3", ip: "10.50.30.11" }
+
+etcd_initial_cluster: >-
+  etcd1=http://10.50.10.11:2380,
+  etcd2=http://10.50.20.11:2380,
+  etcd3=http://10.50.30.11:2380

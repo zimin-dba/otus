@@ -1,0 +1,8 @@
+---
+- name: Configure ETCD cluster
+  hosts: etcd
+  become: true
+  gather_facts: true
+
+  roles:
+    - etcd

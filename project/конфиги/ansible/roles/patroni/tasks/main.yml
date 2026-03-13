@@ -1,0 +1,170 @@
+- name: Prereq packages
+  ansible.builtin.apt:
+    name:
+      - curl
+      - ca-certificates
+      - gnupg
+      - lsb-release
+      - jq
+    state: present
+    update_cache: true
+
+- name: Ensure PGDG key dir exists
+  ansible.builtin.file:
+    path: /usr/share/postgresql-common/pgdg
+    state: directory
+    mode: "0755"
+
+- name: Download PGDG repo key
+  ansible.builtin.get_url:
+    url: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+    dest: "/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc"
+    mode: "0644"
+
+- name: Configure PGDG apt repo
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/pgdg.list
+    mode: "0644"
+    content: |
+      deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main
+
+- name: apt update after adding PGDG
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install PostgreSQL 18 + Patroni + etcd client + deps
+  ansible.builtin.apt:
+    name:
+      - postgresql-18
+      - postgresql-client-18
+      - postgresql-common
+
+      - patroni
+      - python3-psycopg2
+      - python3-etcd
+      - python3-etcd3gw
+      - python3-systemd
+
+      - etcd-client
+    state: present
+
+# Удаление автосозданного кластера 18/main (иначе конфликт портов/каталогов)
+- name: Check existing PG clusters
+  ansible.builtin.command: pg_lsclusters --no-header
+  register: pg_lsclusters_out
+  changed_when: false
+  failed_when: false
+
+- name: Drop default cluster 18/main if exists
+  ansible.builtin.command: pg_dropcluster --stop 18 main
+  when: pg_lsclusters_out.stdout is search("18\\s+main\\s")
+  changed_when: true
+
+- name: Stop and disable legacy postgresql service
+  ansible.builtin.systemd:
+    name: postgresql
+    enabled: false
+    state: stopped
+  failed_when: false
+
+# Директории
+- name: Create Patroni and log dirs
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('postgres') }}"
+    group: "{{ item.group | default('postgres') }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ patroni_conf_dir }}", mode: "0755", owner: "root", group: "root" }
+    - { path: "{{ patroni_log_dir }}", mode: "0750" }
+    - { path: "{{ postgres_log_dir }}", mode: "0750" }
+    - { path: "{{ pg_data_dir }}", mode: "0700" }
+
+- name: Render patroni config (expected by packaged systemd unit)
+  ansible.builtin.template:
+    src: patroni.yml.j2
+    dest: "{{ patroni_conf_file }}"
+    owner: root
+    group: postgres
+    mode: "0640"
+  vars:
+    patroni_private_ip: "{{ hostvars[inventory_hostname].private_ip | default(ansible_default_ipv4.address) }}"
+    patroni_node_name: "{{ hostvars[inventory_hostname].patroni_name | default(inventory_hostname) }}"
+  notify: restart patroni
+
+- name: Symlink /etc/patroni/patroni.yml -> /etc/patroni/config.yml
+  ansible.builtin.file:
+    src: "{{ patroni_conf_file }}"
+    dest: "{{ patroni_conf_dir }}/patroni.yml"
+    state: link
+    force: true
+  notify: restart patroni
+
+- name: Validate Patroni config
+  ansible.builtin.command: patroni --validate-config "{{ patroni_conf_file }}"
+  changed_when: false
+
+- name: Install systemd unit for patroni
+  ansible.builtin.template:
+    src: patroni.service.j2
+    dest: /etc/systemd/system/patroni.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - systemd daemon-reload
+    - restart patroni
+
+- name: Enable and start patroni
+  ansible.builtin.systemd:
+    name: patroni
+    enabled: true
+    state: started
+
+# Проверки
+- name: Check PostgreSQL version
+  ansible.builtin.command: "{{ pg_bin_dir }}/postgres -V"
+  register: pg_ver
+  changed_when: false
+
+- name: Fail if PostgreSQL is not 18.x
+  ansible.builtin.assert:
+    that:
+      - pg_ver.stdout is search(pg_version ~ '\\.')
+    fail_msg: "Expected PostgreSQL {{ pg_version }}, got: {{ pg_ver.stdout }}"
+
+- name: Check Patroni version
+  ansible.builtin.command: patroni --version
+  register: patroni_ver
+  changed_when: false
+
+- name: Fail if Patroni < {{ patroni_min_version }}
+  ansible.builtin.assert:
+    that:
+      - (patroni_ver.stdout.split()[-1] is version(patroni_min_version, '>='))
+    fail_msg: "Expected Patroni >= {{ patroni_min_version }}, got: {{ patroni_ver.stdout }}"
+
+- name: Check etcdctl version
+  ansible.builtin.command: etcdctl version
+  register: etcdctl_ver
+  changed_when: false
+  failed_when: false
+
+- name: Fail if etcdctl is missing
+  ansible.builtin.assert:
+    that:
+      - etcdctl_ver.rc == 0
+    fail_msg: "etcdctl is not available (etcd-client not installed correctly)."
+
+# Быстрый тест patronictl после того как обе ноды поднялись
+- name: Show patronictl list
+  ansible.builtin.command: patronictl -c "{{ patroni_conf_file }}" list
+  register: patronictl_list
+  changed_when: false
+  run_once: true
+
+- name: Print patronictl output
+  ansible.builtin.debug:
+    var: patronictl_list.stdout_lines
+  run_once: true

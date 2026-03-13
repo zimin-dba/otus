@@ -1,0 +1,19 @@
+- hosts: vpn
+  gather_facts: false
+
+  pre_tasks:
+    - name: Remove stale host key from project known_hosts (before SSH)
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.command: >
+        ssh-keygen -f {{ playbook_dir }}/../.known_hosts_dr -R {{ ansible_host }}
+      changed_when: false
+      failed_when: false
+
+  tasks:
+    - name: Gather facts after host key cleanup
+      ansible.builtin.setup:
+
+    - name: Configure WireGuard
+      ansible.builtin.include_role:
+        name: wireguard

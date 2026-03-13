@@ -1,0 +1,66 @@
+pg_version: "18"
+patroni_min_version: "4.0"
+etcdctl_min_version: "0.4"
+
+# ИМЕНА / СЕТЬ / ПОРТЫ
+patroni_scope: "dr-cloud"
+patroni_namespace: "/service"
+patroni_rest_port: 8008
+postgres_port: 5432
+
+# ETCD
+patroni_etcd_hosts:
+  - "10.50.10.11:2379"
+  - "10.50.20.11:2379"
+  - "10.50.30.11:2379"
+patroni_etcd_protocol: "http"
+
+# Пути
+patroni_conf_dir: "/etc/patroni"
+patroni_log_dir: "/var/log/patroni"
+postgres_log_dir: "/var/log/postgresql"
+pg_bin_dir: "/usr/lib/postgresql/{{ pg_version }}/bin"
+
+# Важно: чтобы не конфликтовать с автосозданным 18/main, используем отдельный data_dir
+pg_data_dir: "/var/lib/postgresql/{{ pg_version }}/patroni"
+pg_pgpass: "/var/lib/postgresql/.pgpass_patroni"
+
+patroni_superuser_name: "postgres"
+patroni_superuser_password: "123"
+
+patroni_replication_name: "replicator"
+patroni_replication_password: "123"
+
+patroni_rewind_name: "rewind_user"
+patroni_rewind_password: "123"
+
+# Параметры PostgreSQL
+patroni_pg_parameters:
+  wal_level: "replica"
+  hot_standby: "on"
+  max_wal_senders: 10
+  max_replication_slots: 10
+  wal_keep_size: "512MB"
+  max_slot_wal_keep_size: "2GB"
+  wal_compression: "on"
+  wal_log_hints: "on"
+  password_encryption: "scram-sha-256"
+
+  logging_collector: "on"
+  log_directory: "{{ postgres_log_dir }}"
+  log_filename: "postgresql-{{ pg_version }}-patroni.log"
+  log_rotation_age: "7d"
+  log_rotation_size: "100MB"
+  log_checkpoints: "on"
+  log_connections: "on"
+  log_disconnections: "on"
+  log_lock_waits: "on"
+
+patroni_conf_file: "{{ patroni_conf_dir }}/config.yml"
+# pg_hba
+patroni_pg_hba:
+  - "host replication {{ patroni_replication_name }} 10.50.0.0/16 scram-sha-256"
+  - "host all {{ patroni_rewind_name }} 10.50.0.0/16 scram-sha-256"
+  - "host all all 10.50.0.0/16 scram-sha-256"
+  - "host all all 127.0.0.1/32 trust"
+  - "local all all trust"

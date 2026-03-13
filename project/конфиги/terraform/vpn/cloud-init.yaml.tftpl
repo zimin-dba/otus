@@ -1,0 +1,12 @@
+#cloud-config
+ssh_pwauth: false
+
+users:
+  - name: otus-sb
+    groups: sudo
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_authorized_keys:
+      - ${otus_pubkey}
+
+package_update: true

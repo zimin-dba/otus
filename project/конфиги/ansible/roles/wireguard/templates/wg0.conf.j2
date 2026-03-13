@@ -1,0 +1,25 @@
+[Interface]
+Address = {{ wg_server_address }}
+ListenPort = {{ wg_listen_port }}
+PrivateKey = {{ wg_server_private_key }}
+
+# Разрешаем форвардинг от WG-клиентов в целевые сети через uplink-интерфейс
+PostUp = iptables -C FORWARD -i {{ wg_interface }} -o {{ wg_uplink_iface }} -s {{ wg_clients_cidr }} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i {{ wg_interface }} -o {{ wg_uplink_iface }} -s {{ wg_clients_cidr }} -j ACCEPT
+{% for cidr in wg_forward_cidrs %}
+PostUp = iptables -C FORWARD -i {{ wg_interface }} -o {{ wg_uplink_iface }} -s {{ wg_clients_cidr }} -d {{ cidr }} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i {{ wg_interface }} -o {{ wg_uplink_iface }} -s {{ wg_clients_cidr }} -d {{ cidr }} -j ACCEPT
+PostUp = iptables -C FORWARD -i {{ wg_uplink_iface }} -o {{ wg_interface }} -d {{ wg_clients_cidr }} -s {{ cidr }} -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || iptables -A FORWARD -i {{ wg_uplink_iface }} -o {{ wg_interface }} -d {{ wg_clients_cidr }} -s {{ cidr }} -m state --state ESTABLISHED,RELATED -j ACCEPT
+{% endfor %}
+
+PostDown = iptables -D FORWARD -i {{ wg_interface }} -o {{ wg_uplink_iface }} -s {{ wg_clients_cidr }} -j ACCEPT 2>/dev/null || true
+{% for cidr in wg_forward_cidrs %}
+PostDown = iptables -D FORWARD -i {{ wg_interface }} -o {{ wg_uplink_iface }} -s {{ wg_clients_cidr }} -d {{ cidr }} -j ACCEPT 2>/dev/null || true
+PostDown = iptables -D FORWARD -i {{ wg_uplink_iface }} -o {{ wg_interface }} -d {{ wg_clients_cidr }} -s {{ cidr }} -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+{% endfor %}
+
+{% for c in wg_clients %}
+[Peer]
+# {{ c.name }}
+PublicKey = {{ c.public_key }}
+AllowedIPs = {{ c.allowed_ips }}
+PersistentKeepalive = 25
+{% endfor %}
